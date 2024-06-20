@@ -1,38 +1,39 @@
 use ahash::{HashMap, HashMapExt};
 use core::hash::Hash;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
-pub trait State: Hash + Clone + PartialEq + Eq {
-    fn neighbors(&self) -> Vec<Self>;
+pub trait State: Hash + PartialEq + Eq {
+    fn neighbors(&self) -> Vec<Rc<Self>>;
     fn is_goal(&self) -> bool;
 }
 
 pub struct Tree<T: State> {
-    queue: VecDeque<(T, T)>,
-    visited: HashMap<T, Option<T>>,
+    queue: VecDeque<(Rc<T>, Rc<T>)>,
+    visited: HashMap<Rc<T>, Option<Rc<T>>>,
 }
 
 impl<T: State> Tree<T> {
-    pub fn new(start: &T) -> Tree<T> {
+    pub fn new(start: Rc<T>) -> Tree<T> {
         let mut tree = Tree {
             queue: VecDeque::new(),
             visited: HashMap::new(),
         };
-        tree.visited.insert(start.clone(), None);
-        for t in start.neighbors().iter() {
-            tree.queue.push_back((t.clone(), start.clone()));
+        tree.visited.insert(Rc::clone(&start), None);
+        for t in start.neighbors() {
+            tree.queue.push_back((t, Rc::clone(&start)));
         }
         tree
     }
 
-    fn get_path_to_node(&self, node: &T) -> Vec<T> {
+    fn get_path_to_node(&self, node: &Rc<T>) -> Vec<Rc<T>> {
         let mut result = Vec::new();
         let mut current = node;
-        result.push(current.clone());
+        result.push(Rc::clone(current));
         while let Some(c) = self.visited.get(current) {
             if let Some(d) = c {
                 current = d;
-                result.push(current.clone());
+                result.push(Rc::clone(current));
             } else {
                 break;
             }
@@ -41,24 +42,23 @@ impl<T: State> Tree<T> {
         result
     }
 
-    pub fn run(&mut self) -> Option<Vec<T>> {
-        while !self.queue.is_empty() {
-            let (current, prev) = self.queue.pop_front().unwrap();
+    pub fn run(&mut self) -> Option<Vec<Rc<T>>> {
+        while let Some((current, prev)) = self.queue.pop_front() {
             if self.visited.contains_key(&current) {
                 continue;
             }
-            self.visited.insert(current.clone(), Some(prev));
+            self.visited
+                .insert(Rc::clone(&current), Some(Rc::clone(&prev)));
             if current.is_goal() {
                 return Some(self.get_path_to_node(&current));
             }
             for t in current.neighbors() {
-                self.queue.push_back((t.clone(), current.clone()));
+                self.queue.push_back((t, Rc::clone(&current)));
             }
         }
         None
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,12 +96,12 @@ mod tests {
     }
 
     impl State for Towers {
-        fn neighbors(&self) -> Vec<Towers> {
+        fn neighbors(&self) -> Vec<Rc<Towers>> {
             let mut result = Vec::new();
             for i in 0..self.pegs.len() {
                 for j in 0..self.pegs.len() {
                     if let Some(neighbor) = self.move_disc(i, j) {
-                        result.push(neighbor);
+                        result.push(Rc::new(neighbor));
                     }
                 }
             }
@@ -120,7 +120,7 @@ mod tests {
 
     fn hanoi_len(pegs: usize, discs: usize) -> usize {
         let start = Towers::new(pegs, discs);
-        let mut tree = Tree::new(&start);
+        let mut tree = Tree::new(Rc::new(start));
         if let Some(solution) = tree.run() {
             return solution.len() - 1;
         }
