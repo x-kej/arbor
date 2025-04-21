@@ -1,6 +1,6 @@
 use ahash::{HashMap, HashMapExt};
 use core::hash::Hash;
-use std::collections::VecDeque;
+use std::collections::{BinaryHeap, VecDeque};
 use std::rc::Rc;
 
 pub trait State: Hash + PartialEq + Eq {
@@ -8,9 +8,36 @@ pub trait State: Hash + PartialEq + Eq {
     fn is_goal(&self) -> bool;
 }
 
+pub trait PriorityState: State {
+    fn priority(&self) -> usize;
+}
+
 pub struct Tree<T: State> {
     queue: VecDeque<(Rc<T>, Rc<T>)>,
     visited: HashMap<Rc<T>, Option<Rc<T>>>,
+}
+
+#[derive(Eq, PartialEq)]
+struct PriorityStateWrapper<T: PriorityState> {
+    current: Rc<T>,
+    prev: Rc<T>,
+    priority: usize,
+    number: usize,
+}
+
+impl<T: PriorityState> PartialOrd for PriorityStateWrapper<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: PriorityState> Ord for PriorityStateWrapper<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| self.number.cmp(&other.number))
+    }
 }
 
 impl<T: State> Tree<T> {
@@ -59,6 +86,75 @@ impl<T: State> Tree<T> {
         None
     }
 }
+
+pub struct PriorityTree<T: PriorityState> {
+    counter: usize,
+    queue: BinaryHeap<PriorityStateWrapper<T>>,
+    visited: HashMap<Rc<T>, Option<Rc<T>>>,
+}
+
+impl<T: PriorityState> PriorityTree<T> {
+    pub fn new(start: Rc<T>) -> PriorityTree<T> {
+        let mut tree = PriorityTree {
+            counter: 0,
+            queue: BinaryHeap::new(),
+            visited: HashMap::new(),
+        };
+        tree.visited.insert(Rc::clone(&start), None);
+        for t in start.neighbors() {
+            let item = PriorityStateWrapper {
+                current: Rc::clone(&t),
+                prev: Rc::clone(&start),
+                priority: start.priority(),
+                number: tree.counter,
+            };
+            tree.counter += 1;
+            tree.queue.push(item);
+        }
+        tree
+    }
+
+    fn get_path_to_node(&self, node: &Rc<T>) -> Vec<Rc<T>> {
+        let mut result = Vec::new();
+        let mut current = node;
+        result.push(Rc::clone(current));
+        while let Some(c) = self.visited.get(current) {
+            if let Some(d) = c {
+                current = d;
+                result.push(Rc::clone(current));
+            } else {
+                break;
+            }
+        }
+        result.reverse();
+        result
+    }
+
+    pub fn run(&mut self) -> Option<Vec<Rc<T>>> {
+        while let Some(item) = self.queue.pop() {
+            if self.visited.contains_key(&item.current) {
+                continue;
+            }
+            self.visited
+                .insert(Rc::clone(&item.current), Some(Rc::clone(&item.prev)));
+            if item.current.is_goal() {
+                return Some(self.get_path_to_node(&item.current));
+            }
+            for t in item.current.neighbors() {
+                let wrapper = PriorityStateWrapper {
+                    current: Rc::clone(&t),
+                    prev: Rc::clone(&item.current),
+                    priority: t.priority(),
+                    number: self.counter,
+                };
+                self.counter += 1;
+                self.queue.push(wrapper);
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,9 +225,34 @@ mod tests {
 
     #[test]
     fn test_hanoi() {
-        for d in 1..7 {
+        for d in 1..14 {
             let moves = hanoi_len(3, d);
             assert_eq!(2usize.pow(d as u32) - 1, moves);
+        }
+    }
+
+    impl PriorityState for Towers {
+        fn priority(&self) -> usize {
+            self.pegs[0].len()
+        }
+    }
+
+    fn hanoi_priority_len(pegs: usize, discs: usize) -> usize {
+        let start = Towers::new(pegs, discs);
+        let mut tree = PriorityTree::new(Rc::new(start));
+        if let Some(solution) = tree.run() {
+            dbg!(&solution);
+            return solution.len() - 1;
+        }
+        0
+    }
+
+    #[test]
+    fn test_hanoi_priority() {
+        for d in 1..14 {
+            let moves = hanoi_priority_len(3, d);
+            assert!(2usize.pow(d as u32) - 1 <= moves);
+            //assert_eq!(2usize.pow(d as u32) - 1, moves);
         }
     }
 }
